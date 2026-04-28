@@ -11,6 +11,9 @@ Repository: https://github.com/Sadeemali829/telegram-ivasms-bot
 
 import logging
 import sys
+import os
+import threading
+from flask import Flask
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ConversationHandler
 from telegram.constants import ChatAction
 
@@ -24,6 +27,20 @@ from ivasms_api import api
 from handlers.user_handlers import start, help_handler
 from handlers.admin_handlers import admin_menu
 from handlers.callback_handlers import button_callback
+
+# --- Render Keep-Alive Logic ---
+app = Flask(__name__)
+
+@app.route('/')
+def health_check():
+    return "Bot is running!", 200
+
+def run_flask():
+    # Render automatically provides a PORT environment variable
+    port = int(os.environ.get("PORT", 8080))
+    # use_reloader=False is critical when running in a thread
+    app.run(host='0.0.0.0', port=port, use_reloader=False)
+# ------------------------------
 
 logger = logging.getLogger(__name__)
 
@@ -65,20 +82,24 @@ def main():
         if not api.cookies:
             logger.warning("⚠️ IvaSms cookies not found. Bot will run but may not receive OTPs")
         
+        # Start Flask in a background thread BEFORE the bot polling starts
+        logger.info("🌐 Starting keep-alive Flask server...")
+        threading.Thread(target=run_flask, daemon=True).start()
+        
         # Create application
-        app = Application.builder().token(Config.BOT_TOKEN).build()
+        application = Application.builder().token(Config.BOT_TOKEN).build()
         
         # Add handlers
-        app.add_handler(CommandHandler("start", start))
-        app.add_handler(CommandHandler("help", help_handler))
-        app.add_handler(CommandHandler("admin", admin_menu))
-        app.add_handler(CallbackQueryHandler(button_callback))
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("help", help_handler))
+        application.add_handler(CommandHandler("admin", admin_menu))
+        application.add_handler(CallbackQueryHandler(button_callback))
         
         # Error handler
-        app.add_error_handler(error_handler)
+        application.add_error_handler(error_handler)
         
         # Post init
-        app.post_init = post_init
+        application.post_init = post_init
         
         # Start bot
         logger.info(f"🚀 Starting bot polling...")
@@ -86,7 +107,7 @@ def main():
         logger.info(f"🔌 IvaSms API: {Config.IVASMS_API_URL}")
         logger.info("Press Ctrl+C to stop\n")
         
-        app.run_polling(allowed_updates=["message", "callback_query"])
+        application.run_polling(allowed_updates=["message", "callback_query"])
     
     except KeyboardInterrupt:
         logger.info("\n⏹️ Bot stopped by user")
